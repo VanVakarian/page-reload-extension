@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Page Auto Reloader",
+  "version": "1.1.0",
+  "description": "Автоматическое обновление выбранных страниц каждый интервал",
+  "permissions": [
+    "storage",
+    "tabs",
+    "alarms"
+  ],
+  "icons": {
+    "16": "icon128.png",
+    "48": "icon128.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon128-gray.png",
+    "default_title": "Page Auto Reloader"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
