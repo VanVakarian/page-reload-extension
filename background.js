@@ -1,7 +1,6 @@
 const AUTO_RELOAD_KEY = "autoReloadTabs";
 const ICON_ACTIVE = "icon128.png";
 const ICON_INACTIVE = "icon128-gray.png";
-const MINUTE_MS = 60000;
 
 const alarmName = (tabId) => `autoReload-${tabId}`;
 
@@ -69,15 +68,16 @@ const clearAlarm = (tabId) =>
     chrome.alarms.clear(alarmName(tabId), () => resolve());
   });
 
-const scheduleAlarm = (tabId, intervalMinutes = 1) => {
+const scheduleAlarm = (tabId, intervalSeconds = 60) => {
   const numericId = Number(tabId);
   if (Number.isNaN(numericId)) {
     return;
   }
 
+  const delayInMinutes = intervalSeconds / 60;
   chrome.alarms.create(alarmName(numericId), {
-    delayInMinutes: intervalMinutes,
-    periodInMinutes: intervalMinutes,
+    delayInMinutes,
+    periodInMinutes: delayInMinutes,
   });
 };
 
@@ -92,6 +92,23 @@ const getTab = (tabId) =>
     });
   });
 
+const formatBadgeText = (totalSeconds) => {
+  // Если >= 60 минут, показываем часы
+  if (totalSeconds >= 3600) {
+    const hours = Math.floor(totalSeconds / 3600);
+    return `${hours}h`;
+  }
+
+  // Если >= 60 секунд, показываем минуты
+  if (totalSeconds >= 60) {
+    const minutes = Math.floor(totalSeconds / 60);
+    return `${minutes}m`;
+  }
+
+  // Иначе показываем секунды (включая 0)
+  return `${totalSeconds}s`;
+};
+
 const refreshBadgeText = () => {
   if (!Object.keys(trackedTabsCache).length) {
     return;
@@ -100,12 +117,12 @@ const refreshBadgeText = () => {
   const now = Date.now();
 
   Object.entries(trackedTabsCache).forEach(([tabId, entry]) => {
-    const intervalMinutes = entry.intervalMinutes || 1;
-    const intervalMs = intervalMinutes * MINUTE_MS;
+    const intervalSeconds = entry.intervalSeconds || 60;
+    const intervalMs = intervalSeconds * 1000;
     const nextReloadAt = entry.nextReloadAt || now + intervalMs;
     const remainingMs = Math.max(0, nextReloadAt - now);
-    const remainingSec = Math.max(0, Math.floor(remainingMs / 1000));
-    const text = remainingSec > 0 ? String(remainingSec) : "0";
+    const remainingSec = Math.ceil(remainingMs / 1000);
+    const text = formatBadgeText(remainingSec);
 
     updateBadgeText(tabId, text);
   });
@@ -141,10 +158,10 @@ const disableTabReload = async (tabId) => {
 
 const ensureEntryDefaults = (entry) => {
   const normalized = { ...entry };
-  normalized.intervalMinutes = normalized.intervalMinutes || 1;
+  normalized.intervalSeconds = normalized.intervalSeconds || 60;
 
   const now = Date.now();
-  const targetMs = normalized.intervalMinutes * MINUTE_MS;
+  const targetMs = normalized.intervalSeconds * 1000;
 
   if (!normalized.nextReloadAt || normalized.nextReloadAt <= now) {
     normalized.nextReloadAt = now + targetMs;
@@ -187,7 +204,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
       const normalized = ensureEntryDefaults(tabsMap[tabId]);
       if (
-        normalized.intervalMinutes !== tabsMap[tabId].intervalMinutes ||
+        normalized.intervalSeconds !== tabsMap[tabId].intervalSeconds ||
         normalized.nextReloadAt !== tabsMap[tabId].nextReloadAt
       ) {
         changed = true;
@@ -195,7 +212,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
       tabsMap[tabId] = normalized;
       setIconForTab(numericId, true);
-      scheduleAlarm(numericId, tabsMap[tabId].intervalMinutes || 1);
+      scheduleAlarm(numericId, tabsMap[tabId].intervalSeconds || 60);
     })
   );
 
@@ -277,7 +294,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     return;
   }
 
-  entry.nextReloadAt = Date.now() + (entry.intervalMinutes || 1) * MINUTE_MS;
+  entry.nextReloadAt = Date.now() + (entry.intervalSeconds || 60) * 1000;
   await setStoredTabs(trackedTabsCache);
   refreshBadgeText();
   chrome.tabs.reload(tabId);
@@ -301,13 +318,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
       return;
     }
 
-    if (!entry.intervalMinutes) {
-      entry.intervalMinutes = 1;
+    if (!entry.intervalSeconds) {
+      entry.intervalSeconds = 60;
       needsPersist = true;
     }
 
     if (!entry.nextReloadAt || entry.nextReloadAt <= now) {
-      entry.nextReloadAt = now + entry.intervalMinutes * MINUTE_MS;
+      entry.nextReloadAt = now + entry.intervalSeconds * 1000;
       needsPersist = true;
     }
   });
@@ -329,7 +346,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
       return;
     }
 
-    scheduleAlarm(tabId, entry.intervalMinutes || 1);
+    scheduleAlarm(tabId, entry.intervalSeconds || 60);
     setIconForTab(tabId, true);
   });
 

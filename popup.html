@@ -6,101 +6,78 @@
   <meta name="viewport"
         content="width=device-width, initial-scale=1.0">
   <title>Page Auto Reloader</title>
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      width: 150px;
-      height: 150px;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
-
-    .checkbox-wrapper {
-      position: relative;
-    }
-
-    input[type="checkbox"] {
-      appearance: none;
-      width: 80px;
-      height: 80px;
-      border-radius: 15px;
-      background: white;
-      cursor: pointer;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-      transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-      position: relative;
-    }
-
-    input[type="checkbox"]:hover {
-      transform: scale(1.05);
-      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.4);
-    }
-
-    input[type="checkbox"]:active {
-      transform: scale(0.95);
-    }
-
-    input[type="checkbox"]::before {
-      content: '';
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%) scale(0);
-      width: 50px;
-      height: 50px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      border-radius: 8px;
-      transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-    }
-
-    input[type="checkbox"]:checked::before {
-      transform: translate(-50%, -50%) scale(1) rotate(360deg);
-    }
-
-    input[type="checkbox"]::after {
-      content: '✓';
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%) scale(0);
-      font-size: 35px;
-      color: white;
-      font-weight: bold;
-      transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-      transition-delay: 0.1s;
-    }
-
-    input[type="checkbox"]:checked::after {
-      transform: translate(-50%, -50%) scale(1);
-    }
-
-    @keyframes pulse {
-
-      0%,
-      100% {
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-      }
-
-      50% {
-        box-shadow: 0 10px 30px rgba(102, 126, 234, 0.6);
-      }
-    }
-
-    input[type="checkbox"]:checked {
-      animation: pulse 2s infinite;
-    }
-  </style>
+  <link rel="stylesheet"
+        href="popup.css">
 </head>
 
 <body>
-  <div class="checkbox-wrapper">
-    <input type="checkbox"
-           id="extensionToggle">
+  <div class="container">
+    <div class="time-inputs">
+      <div class="input-group">
+        <div class="input-wrapper">
+          <label class="input-label"
+                 for="hours">Часы</label>
+          <input type="number"
+                 id="hours"
+                 class="time-input"
+                 min="0"
+                 max="999"
+                 placeholder="0"
+                 value="0">
+        </div>
+        <div class="input-wrapper">
+          <label class="input-label"
+                 for="minutes">Минуты</label>
+          <input type="number"
+                 id="minutes"
+                 class="time-input"
+                 min="0"
+                 max="999"
+                 placeholder="0"
+                 value="1">
+        </div>
+        <div class="input-wrapper">
+          <label class="input-label"
+                 for="seconds">Секунды</label>
+          <input type="number"
+                 id="seconds"
+                 class="time-input"
+                 min="0"
+                 max="999"
+                 placeholder="0"
+                 value="0">
+        </div>
+      </div>
+
+      <div id="intervalDisplay"
+           class="interval-display">
+        Интервал: не задан
+      </div>
+
+      <div id="remainingDisplay"
+           class="remaining-display">
+        Введите интервал обновления
+      </div>
+
+      <div class="error-message"
+           id="errorMessage">
+        Время должно быть больше 0
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="startBtn"
+              class="btn btn-start">
+        ▶ Запустить
+      </button>
+      <button id="stopBtn"
+              class="btn btn-stop"
+              disabled>
+        ⏹ Остановить
+      </button>
+    </div>
   </div>
+
   <script src="popup.js"></script>
 </body>
 
