@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Page Auto Reloader",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Automatically reload selected pages with flexible interval settings",
   "permissions": [
     "storage",
     "tabs",
-    "alarms"
+    "alarms",
+    "sidePanel"
   ],
   "icons": {
     "16": "icon128.png",
@@ -14,9 +15,11 @@
     "128": "icon128.png"
   },
   "action": {
-    "default_popup": "popup.html",
     "default_icon": "icon128-gray.png",
     "default_title": "Page Auto Reloader"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
   },
   "background": {
     "service_worker": "background.js"

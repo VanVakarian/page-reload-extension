@@ -701,6 +701,30 @@ loadState().then(() => {
   document.body.classList.add("loaded");
 });
 
+// Отслеживание переключения вкладок
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  // Останавливаем обновления для предыдущей вкладки
+  stopStatusUpdates();
+
+  // Загружаем состояние для новой активной вкладки
+  await loadState();
+});
+
+// Отслеживание обновления вкладок (например, изменение URL)
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  // Проверяем, это текущая активная вкладка и изменился URL или статус
+  const activeTab = await queryActiveTab();
+  if (
+    activeTab &&
+    activeTab.id === tabId &&
+    (changeInfo.url || changeInfo.status === "complete")
+  ) {
+    // Перезагружаем состояние для текущей вкладки
+    stopStatusUpdates();
+    await loadState();
+  }
+});
+
 // Очистка при закрытии popup
 window.addEventListener("unload", () => {
   stopStatusUpdates();

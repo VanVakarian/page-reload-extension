@@ -296,6 +296,9 @@ chrome.runtime.onInstalled.addListener(() => {
   if (chrome.action.setBadgeTextColor) {
     chrome.action.setBadgeTextColor({ color: "#ffffff" });
   }
+
+  // Настраиваем поведение side panel: клик на иконку открывает/закрывает панель
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 });
 
 chrome.runtime.onStartup.addListener(async () => {

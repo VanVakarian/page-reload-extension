@@ -5,9 +5,11 @@
 }
 
 body {
-  width: 320px;
-  min-height: 280px;
-  padding: 24px;
+  width: 100%;
+  min-width: 360px;
+  max-width: 480px;
+  min-height: 100vh;
+  padding: 28px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color: #1a202c;
@@ -22,21 +24,23 @@ body.loaded {
 .container {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
 }
 
 .time-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
   background: white;
-  border-radius: 12px;
-  padding: 20px;
+  border-radius: 14px;
+  padding: 24px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
 }
 
 .input-group {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 16px;
 }
 
 .input-wrapper {
@@ -56,12 +60,12 @@ body.loaded {
 
 .time-input {
   width: 100%;
-  padding: 10px 8px;
-  font-size: 20px;
+  padding: 12px 10px;
+  font-size: 22px;
   font-weight: 600;
-  text-align: center;
+  text-align: right;
   border: 2px solid #e2e8f0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #f8fafc;
   color: #1a202c;
   transition: all 0.2s ease;
@@ -86,25 +90,29 @@ body.loaded {
 }
 
 .slider-section {
-  margin-bottom: 16px;
-  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
   background: linear-gradient(135deg, #667eea08 0%, #764ba208 100%);
-  border-radius: 10px;
+  border-radius: 12px;
   border: 2px dashed #e2e8f0;
 }
 
 .slider-value-display {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
   text-align: center;
   color: #667eea;
-  margin-bottom: 16px;
   text-shadow: 0 2px 4px rgba(102, 126, 234, 0.1);
   letter-spacing: 0.5px;
-  min-height: 36px;
+  min-height: 40px;
 }
 
 .slider-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   position: relative;
   padding: 0 8px;
 }
@@ -127,7 +135,6 @@ body.loaded {
   border-radius: 5px;
   outline: none;
   cursor: pointer;
-  margin-bottom: 8px;
   position: relative;
   z-index: 10;
 }
@@ -197,7 +204,6 @@ body.loaded {
   display: flex;
   justify-content: space-between;
   padding: 0 4px;
-  margin-top: 4px;
 }
 
 .mark {
@@ -229,7 +235,6 @@ body.loaded {
   font-size: 12px;
   color: #64748b;
   font-weight: 500;
-  margin-bottom: 8px;
 }
 
 .interval-display.active {
@@ -280,11 +285,11 @@ body.loaded {
 
 .btn {
   flex: 1;
-  padding: 7px;
-  font-size: 24px;
+  padding: 10px;
+  font-size: 26px;
   font-weight: 600;
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -333,7 +338,6 @@ body.loaded {
   color: #ef4444;
   text-align: center;
   padding: 8px;
-  margin-top: 8px;
   background: rgba(239, 68, 68, 0.1);
   border-radius: 6px;
   display: none;
@@ -345,10 +349,12 @@ body.loaded {
 
 /* Randomness Section */
 .randomness-section {
-  margin-bottom: 16px;
-  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
   background: linear-gradient(135deg, #f0f9ff 0%, #e0e7ff 100%);
-  border-radius: 10px;
+  border-radius: 12px;
   border: 2px solid #e0e7ff;
 }
 
@@ -379,14 +385,14 @@ body.loaded {
 }
 
 .checkbox-nested {
-  margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid #cbd5e1;
 }
 
 .randomness-controls {
-  margin-top: 14px;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .randomness-controls.hidden {
@@ -394,7 +400,9 @@ body.loaded {
 }
 
 .variation-slider-wrapper {
-  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .variation-label {
@@ -402,7 +410,6 @@ body.loaded {
   font-size: 12px;
   font-weight: 600;
   color: #64748b;
-  margin-bottom: 8px;
   text-align: center;
 }
 
@@ -420,7 +427,6 @@ body.loaded {
   border-radius: 3px;
   outline: none;
   cursor: pointer;
-  margin-bottom: 6px;
 }
 
 .variation-slider::-webkit-slider-thumb {
@@ -477,7 +483,6 @@ body.loaded {
   padding: 8px;
   background: rgba(255, 255, 255, 0.5);
   border-radius: 6px;
-  margin-bottom: 8px;
 }
 
 #uniformRangeText {
@@ -485,11 +490,12 @@ body.loaded {
 }
 
 .normal-dist-info {
-  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   padding: 10px;
   background: rgba(255, 255, 255, 0.6);
   border-radius: 6px;
-  display: block;
 }
 
 .normal-dist-info.hidden {
@@ -499,12 +505,7 @@ body.loaded {
 .dist-range {
   font-size: 11px;
   color: #475569;
-  margin-bottom: 4px;
   font-weight: 500;
-}
-
-.dist-range:last-child {
-  margin-bottom: 0;
 }
 
 .dist-range span {
