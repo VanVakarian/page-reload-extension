@@ -12,7 +12,35 @@
 
 <body>
   <div class="container">
-    <div class="time-inputs">
+    <!-- Top block: Status info and controls -->
+    <div class="status-block">
+      <div id="remainingDisplay"
+           class="remaining-display">
+        <div id="intervalDisplay"
+             class="interval-display">
+          Interval is not set
+        </div>
+        <div class="reload-status">
+          Enter reload interval
+        </div>
+      </div>
+
+      <div class="controls">
+        <button id="startBtn"
+                class="btn btn-start"
+                disabled>
+          ▶ Start
+        </button>
+        <button id="stopBtn"
+                class="btn btn-stop"
+                disabled>
+          ⏹ Stop
+        </button>
+      </div>
+    </div>
+
+    <!-- Bottom block: Settings -->
+    <div class="settings-block">
       <div class="input-group">
         <div class="input-wrapper">
           <label class="input-label"
@@ -72,6 +100,11 @@
         </div>
       </div>
 
+      <div class="error-message"
+           id="errorMessage">
+        Time must be greater than 0
+      </div>
+
       <!-- Randomness Section -->
       <div class="randomness-section">
         <label class="checkbox-label">
@@ -119,33 +152,18 @@
         </div>
       </div>
 
-      <div id="intervalDisplay"
-           class="interval-display">
-        Interval: not set
+      <!-- Domain Scope Section -->
+      <div class="domain-scope-section">
+        <label class="checkbox-label">
+          <input type="checkbox"
+                 id="applyToDomainCheckbox"
+                 class="checkbox-input">
+          <span class="checkbox-text">Apply to entire domain</span>
+        </label>
+        <div class="domain-hint"
+             id="domainHint"></div>
       </div>
 
-      <div id="remainingDisplay"
-           class="remaining-display">
-        Enter reload interval
-      </div>
-
-      <div class="error-message"
-           id="errorMessage">
-        Time must be greater than 0
-      </div>
-    </div>
-
-    <div class="controls">
-      <button id="startBtn"
-              class="btn btn-start"
-              disabled>
-        ▶ Start
-      </button>
-      <button id="stopBtn"
-              class="btn btn-stop"
-              disabled>
-        ⏹ Stop
-      </button>
     </div>
   </div>
 

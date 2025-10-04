@@ -27,7 +27,19 @@ body.loaded {
   gap: 24px;
 }
 
-.time-inputs {
+/* Top block with status and controls */
+.status-block {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: white;
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+/* Bottom block with all settings */
+.settings-block {
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -228,13 +240,10 @@ body.loaded {
 }
 
 .interval-display {
-  padding: 10px 12px;
-  background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
-  border-radius: 8px;
-  text-align: center;
   font-size: 12px;
   color: #64748b;
   font-weight: 500;
+  margin-bottom: 4px;
 }
 
 .interval-display.active {
@@ -243,15 +252,21 @@ body.loaded {
 }
 
 .remaining-display {
-  padding: 14px 12px;
+  padding: 16px 14px;
   background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
   border-radius: 8px;
   text-align: center;
-  font-size: 15px;
-  color: #64748b;
-  font-weight: 500;
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reload-status {
+  font-size: 15px;
+  color: #64748b;
+  font-weight: 700;
 }
 
 .remaining-display::before {
@@ -345,6 +360,25 @@ body.loaded {
 
 .error-message.show {
   display: block;
+}
+
+/* Domain Scope Section */
+.domain-scope-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-radius: 12px;
+  border: 2px solid #fde68a;
+}
+
+.domain-hint {
+  font-size: 11px;
+  color: #92400e;
+  font-weight: 500;
+  padding-left: 28px;
+  line-height: 1.4;
 }
 
 /* Randomness Section */

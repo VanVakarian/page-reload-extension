@@ -1,4 +1,5 @@
 const AUTO_RELOAD_KEY = "autoReloadTabs";
+const ORPHANED_TIMERS_KEY = "orphanedTimers"; // Таймеры без активной вкладки
 const ICON_ACTIVE = "icon128.png";
 const ICON_INACTIVE = "icon128-gray.png";
 const MIN_ALARM_INTERVAL = 30; // Минимальный интервал для chrome.alarms (секунды)
@@ -8,6 +9,45 @@ const alarmName = (tabId) => `autoReload-${tabId}`;
 let trackedTabsCache = {};
 let countdownIntervalId = null;
 let timeoutIds = {}; // Хранилище timeout IDs для интервалов < 30 секунд
+
+/**
+ * Получить ключ таймера (URL или домен)
+ */
+const getTimerKey = (url, applyToDomain) => {
+  if (applyToDomain) {
+    return getDomainFromUrl(url) || url;
+  }
+  return url;
+};
+
+/**
+ * Извлечь домен из URL
+ */
+const getDomainFromUrl = (url) => {
+  try {
+    const urlObj = new URL(url);
+    return urlObj.hostname;
+  } catch (e) {
+    return null;
+  }
+};
+
+/**
+ * Проверяет, соответствует ли URL настройке (точный URL или домен)
+ */
+const urlMatches = (currentUrl, savedUrl, applyToDomain) => {
+  if (currentUrl === savedUrl) {
+    return true;
+  }
+
+  if (applyToDomain) {
+    const currentDomain = getDomainFromUrl(currentUrl);
+    const savedDomain = getDomainFromUrl(savedUrl);
+    return currentDomain && savedDomain && currentDomain === savedDomain;
+  }
+
+  return false;
+};
 
 /**
  * Генерирует случайное число с нормальным распределением (bell curve)
@@ -170,10 +210,15 @@ const handleReload = async (tabId) => {
   }
 
   const tab = await getTab(tabId);
-  if (!tab || tab.url !== entry.url) {
+
+  // Если вкладка закрыта - удаляем таймер
+  if (!tab) {
     await disableTabReload(tabId);
     return;
   }
+
+  // Проверяем, соответствует ли текущий URL
+  const shouldReload = urlMatches(tab.url, entry.url, entry.applyToDomain);
 
   // Вычисляем следующий интервал с учетом случайности
   const nextInterval = calculateNextInterval(entry);
@@ -183,10 +228,12 @@ const handleReload = async (tabId) => {
   await setStoredTabs(trackedTabsCache);
   refreshBadgeText();
 
-  // Перезагружаем страницу
-  chrome.tabs.reload(tabId);
+  // Перезагружаем страницу ТОЛЬКО если URL соответствует
+  if (shouldReload) {
+    chrome.tabs.reload(tabId);
+  }
 
-  // Создаем НОВЫЙ таймер со случайным интервалом
+  // Создаем НОВЫЙ таймер в ЛЮБОМ случае (таймер работает в фоне)
   await scheduleReload(tabId, nextInterval);
 };
 
@@ -218,14 +265,23 @@ const formatBadgeText = (totalSeconds) => {
   return `${totalSeconds}s`;
 };
 
-const refreshBadgeText = () => {
+const refreshBadgeText = async () => {
   if (!Object.keys(trackedTabsCache).length) {
     return;
   }
 
   const now = Date.now();
 
-  Object.entries(trackedTabsCache).forEach(([tabId, entry]) => {
+  for (const [tabId, entry] of Object.entries(trackedTabsCache)) {
+    const tab = await getTab(Number(tabId));
+
+    // Показываем badge только если вкладка существует и URL соответствует
+    if (!tab || !urlMatches(tab.url, entry.url, entry.applyToDomain)) {
+      updateBadgeText(tabId, "");
+      setIconForTab(tabId, false);
+      continue;
+    }
+
     const intervalSeconds = entry.intervalSeconds || 60;
     const intervalMs = intervalSeconds * 1000;
     const nextReloadAt = entry.nextReloadAt || now + intervalMs;
@@ -234,7 +290,8 @@ const refreshBadgeText = () => {
     const text = formatBadgeText(remainingSec);
 
     updateBadgeText(tabId, text);
-  });
+    setIconForTab(tabId, true);
+  }
 };
 
 function updateCountdownLoopState() {
@@ -315,7 +372,10 @@ chrome.runtime.onStartup.addListener(async () => {
       }
 
       const tab = await getTab(numericId);
-      if (!tab || tab.url !== tabsMap[tabId].url) {
+      if (
+        !tab ||
+        !urlMatches(tab.url, tabsMap[tabId].url, tabsMap[tabId].applyToDomain)
+      ) {
         delete tabsMap[tabId];
         changed = true;
         await clearReload(numericId);
@@ -353,38 +413,161 @@ chrome.runtime.onStartup.addListener(async () => {
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
-  if (!trackedTabsCache[tabId]) {
-    return;
-  }
-
-  await disableTabReload(tabId);
-});
-
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   const entry = trackedTabsCache[tabId];
 
   if (!entry) {
     return;
   }
 
-  if (changeInfo.url && changeInfo.url !== entry.url) {
-    await disableTabReload(tabId);
+  // Сохраняем таймер как "осиротевший" перед удалением
+  const timerKey = getTimerKey(entry.url, entry.applyToDomain);
+
+  // Загружаем текущие осиротевшие таймеры
+  const orphanedTimers = await new Promise((resolve) => {
+    chrome.storage.local.get([ORPHANED_TIMERS_KEY], (result) => {
+      resolve(result[ORPHANED_TIMERS_KEY] || {});
+    });
+  });
+
+  // Сохраняем таймер по ключу
+  orphanedTimers[timerKey] = {
+    ...entry,
+    savedAt: Date.now(), // Когда был сохранен
+  };
+
+  await new Promise((resolve) => {
+    chrome.storage.local.set(
+      { [ORPHANED_TIMERS_KEY]: orphanedTimers },
+      resolve
+    );
+  });
+
+  // Удаляем из активных
+  await disableTabReload(tabId);
+});
+
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  const entry = trackedTabsCache[tabId];
+
+  // При завершении загрузки проверяем, нет ли осиротевшего таймера
+  if (!entry && changeInfo.status === "complete" && tab.url) {
+    // Загружаем осиротевшие таймеры
+    const orphanedTimers = await new Promise((resolve) => {
+      chrome.storage.local.get([ORPHANED_TIMERS_KEY], (result) => {
+        resolve(result[ORPHANED_TIMERS_KEY] || {});
+      });
+    });
+
+    // Ищем подходящий таймер
+    for (const [key, timer] of Object.entries(orphanedTimers)) {
+      if (urlMatches(tab.url, timer.url, timer.applyToDomain)) {
+        // Нашли! Восстанавливаем таймер
+        const now = Date.now();
+        const remainingMs = Math.max(0, timer.nextReloadAt - now);
+
+        if (remainingMs > 0) {
+          // Таймер еще не истек - восстанавливаем
+          const remainingSec = Math.ceil(remainingMs / 1000);
+
+          // Обновляем URL для applyToDomain режима
+          if (timer.applyToDomain && tab.url !== timer.url) {
+            timer.url = tab.url;
+          }
+
+          trackedTabsCache[tabId] = timer;
+          await setStoredTabs(trackedTabsCache);
+          await scheduleReload(tabId, remainingSec);
+          setIconForTab(tabId, true);
+          await refreshBadgeText();
+
+          // Уведомляем side panel о восстановлении таймера
+          chrome.runtime
+            .sendMessage({
+              type: "timerRestored",
+              tabId: tabId,
+            })
+            .catch(() => {
+              // Игнорируем ошибку если side panel не открыт
+            });
+        } else {
+          // Таймер уже истек - запускаем заново
+          const nextInterval = calculateNextInterval(timer);
+          timer.nextReloadAt = now + nextInterval * 1000;
+          timer.currentActualInterval = nextInterval;
+
+          if (timer.applyToDomain && tab.url !== timer.url) {
+            timer.url = tab.url;
+          }
+
+          trackedTabsCache[tabId] = timer;
+          await setStoredTabs(trackedTabsCache);
+          await scheduleReload(tabId, nextInterval);
+          setIconForTab(tabId, true);
+          await refreshBadgeText();
+
+          // Уведомляем side panel о восстановлении таймера
+          chrome.runtime
+            .sendMessage({
+              type: "timerRestored",
+              tabId: tabId,
+            })
+            .catch(() => {
+              // Игнорируем ошибку если side panel не открыт
+            });
+        }
+
+        // Удаляем из осиротевших
+        delete orphanedTimers[key];
+        await new Promise((resolve) => {
+          if (Object.keys(orphanedTimers).length === 0) {
+            chrome.storage.local.remove(ORPHANED_TIMERS_KEY, resolve);
+          } else {
+            chrome.storage.local.set(
+              { [ORPHANED_TIMERS_KEY]: orphanedTimers },
+              resolve
+            );
+          }
+        });
+
+        return; // Нашли и восстановили
+      }
+    }
+  }
+
+  if (!entry) {
     return;
   }
 
-  // При любом изменении статуса восстанавливаем иконку и badge
-  if (changeInfo.status === "loading" || changeInfo.status === "complete") {
-    setIconForTab(tabId, true);
+  // Если URL изменился
+  if (changeInfo.url) {
+    const matches = urlMatches(changeInfo.url, entry.url, entry.applyToDomain);
 
-    // Немедленно обновляем badge для этой вкладки
-    const now = Date.now();
-    const intervalSeconds = entry.intervalSeconds || 60;
-    const intervalMs = intervalSeconds * 1000;
-    const nextReloadAt = entry.nextReloadAt || now + intervalMs;
-    const remainingMs = Math.max(0, nextReloadAt - now);
-    const remainingSec = Math.ceil(remainingMs / 1000);
-    const text = formatBadgeText(remainingSec);
-    updateBadgeText(tabId, text);
+    if (!matches) {
+      // URL не соответствует
+      if (entry.applyToDomain) {
+        // Для domain mode - полностью отключаем (другой домен)
+        await disableTabReload(tabId);
+        return;
+      } else {
+        // Для URL mode - просто скрываем визуальные индикаторы
+        // Таймер продолжает работать в фоне
+        updateBadgeText(tabId, "");
+        setIconForTab(tabId, false);
+        return;
+      }
+    }
+
+    // URL соответствует - обновляем entry.url для applyToDomain режима
+    if (entry.applyToDomain && changeInfo.url !== entry.url) {
+      entry.url = changeInfo.url;
+      trackedTabsCache[tabId] = entry;
+      await setStoredTabs(trackedTabsCache);
+    }
+  }
+
+  // При любом изменении статуса обновляем визуальные индикаторы
+  if (changeInfo.status === "loading" || changeInfo.status === "complete") {
+    await refreshBadgeText();
   }
 });
 
@@ -392,28 +575,16 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   const tab = await getTab(tabId);
 
   if (!tab) {
-    await disableTabReload(tabId);
     return;
   }
 
   const entry = trackedTabsCache[tabId];
-  const isActive = Boolean(entry && entry.url === tab.url);
-  setIconForTab(tabId, isActive);
-
-  if (!isActive) {
-    updateBadgeText(tabId, "");
+  if (!entry) {
     return;
   }
 
-  // Немедленно обновляем badge для активной вкладки
-  const now = Date.now();
-  const intervalSeconds = entry.intervalSeconds || 60;
-  const intervalMs = intervalSeconds * 1000;
-  const nextReloadAt = entry.nextReloadAt || now + intervalMs;
-  const remainingMs = Math.max(0, nextReloadAt - now);
-  const remainingSec = Math.ceil(remainingMs / 1000);
-  const text = formatBadgeText(remainingSec);
-  updateBadgeText(tabId, text);
+  // Обновляем визуальные индикаторы на основе текущего URL
+  await refreshBadgeText();
 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {

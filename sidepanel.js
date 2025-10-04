@@ -26,6 +26,8 @@ const normalDistCheckbox = document.getElementById("normalDistCheckbox");
 const normalDistInfo = document.getElementById("normalDistInfo");
 const range68 = document.getElementById("range68");
 const range95 = document.getElementById("range95");
+const applyToDomainCheckbox = document.getElementById("applyToDomainCheckbox");
+const domainHint = document.getElementById("domainHint");
 
 // Константы для экспоненциальной функции
 const EXP_K = 0.1; // Коэффициент экспоненты
@@ -76,22 +78,39 @@ const saveStoredTabs = (tabsMap) =>
     chrome.storage.local.set({ [AUTO_RELOAD_KEY]: tabsMap }, resolve);
   });
 
-// Получить настройки для конкретного URL
-const getUrlSettings = async (url) => {
+// Получить настройки для конкретного URL или домена
+const getUrlSettings = async (url, checkDomain = true) => {
   return new Promise((resolve) => {
     chrome.storage.local.get([URL_SETTINGS_KEY], (result) => {
       const allSettings = result[URL_SETTINGS_KEY] || {};
-      resolve(allSettings[url] || null);
+
+      // Сначала проверяем точный URL
+      if (allSettings[url]) {
+        resolve(allSettings[url]);
+        return;
+      }
+
+      // Если не найдено и разрешена проверка домена, проверяем домен
+      if (checkDomain) {
+        const domain = getDomainFromUrl(url);
+        if (domain && allSettings[domain]) {
+          resolve(allSettings[domain]);
+          return;
+        }
+      }
+
+      resolve(null);
     });
   });
 };
 
-// Сохранить настройки для конкретного URL
+// Сохранить настройки для конкретного URL или домена
 const saveUrlSettings = async (url, settings) => {
   return new Promise((resolve) => {
     chrome.storage.local.get([URL_SETTINGS_KEY], (result) => {
       const allSettings = result[URL_SETTINGS_KEY] || {};
-      allSettings[url] = settings;
+      const key = getSettingsKey(url, settings.applyToDomain);
+      allSettings[key] = settings;
       chrome.storage.local.set({ [URL_SETTINGS_KEY]: allSettings }, resolve);
     });
   });
@@ -102,6 +121,7 @@ const getCurrentSettings = () => {
   const totalSeconds = getTimeInSeconds();
   return {
     intervalSeconds: totalSeconds,
+    applyToDomain: applyToDomainCheckbox.checked,
     randomness: {
       enabled: randomnessCheckbox.checked,
       variationPercent: randomnessCheckbox.checked
@@ -134,6 +154,24 @@ const setIconForTab = (tabId, enabled) => {
 };
 
 const isUrlEligible = (url) => Boolean(url && /^https?:/i.test(url));
+
+// Извлечь домен из URL
+const getDomainFromUrl = (url) => {
+  try {
+    const urlObj = new URL(url);
+    return urlObj.hostname;
+  } catch (e) {
+    return null;
+  }
+};
+
+// Получить ключ для сохранения настроек (URL или домен)
+const getSettingsKey = (url, useDomain = false) => {
+  if (useDomain) {
+    return getDomainFromUrl(url) || url;
+  }
+  return url;
+};
 
 // Конвертация времени в секунды
 const getTimeInSeconds = () => {
@@ -206,9 +244,10 @@ const syncSliderWithInputs = () => {
 // Обновление UI статуса
 const updateStatus = (remainingSeconds, totalSeconds) => {
   if (remainingSeconds === null) {
-    intervalDisplay.textContent = "Interval: not set";
+    intervalDisplay.textContent = "Interval is not set";
     intervalDisplay.classList.remove("active");
-    remainingDisplay.textContent = "Enter reload interval";
+    document.querySelector(".reload-status").textContent =
+      "Enter reload interval";
     remainingDisplay.classList.remove("active");
     remainingDisplay.style.setProperty("--progress-width", "0%");
     lastProgressWidth = 0; // Сбрасываем для следующего запуска
@@ -218,10 +257,12 @@ const updateStatus = (remainingSeconds, totalSeconds) => {
   const formattedRemaining = formatTime(remainingSeconds);
   const formattedTotal = formatTime(totalSeconds);
 
-  intervalDisplay.textContent = `Interval: ${formattedTotal}`;
+  intervalDisplay.textContent = `Interval is set to ${formattedTotal}`;
   intervalDisplay.classList.add("active");
 
-  remainingDisplay.textContent = `⏱️ Until reload: ${formattedRemaining}`;
+  document.querySelector(
+    ".reload-status"
+  ).textContent = `⏱️ Until reload: ${formattedRemaining}`;
   remainingDisplay.classList.add("active");
 
   // Обновляем фон блока как прогресс-бар
@@ -282,6 +323,7 @@ const setInputsDisabled = (disabled) => {
   minutesInput.disabled = disabled;
   secondsInput.disabled = disabled;
   timeSlider.disabled = disabled;
+  applyToDomainCheckbox.disabled = disabled;
   randomnessCheckbox.disabled = disabled;
   variationSlider.disabled = disabled;
   normalDistCheckbox.disabled = disabled;
@@ -377,8 +419,9 @@ const startAutoReload = async () => {
 
   const activeTab = await queryActiveTab();
   if (!activeTab || !isUrlEligible(activeTab.url)) {
-    intervalDisplay.textContent = "Interval: not set";
-    remainingDisplay.textContent = "⚠️ Not available for this page";
+    intervalDisplay.textContent = "Interval is not set";
+    document.querySelector(".reload-status").textContent =
+      "⚠️ Not available for this page";
     return;
   }
 
@@ -426,6 +469,7 @@ const startAutoReload = async () => {
     intervalSeconds: totalSeconds,
     nextReloadAt,
     randomness: randomnessConfig,
+    applyToDomain: applyToDomainCheckbox.checked,
     currentActualInterval: firstInterval, // Реальный интервал для текущего цикла
   };
 
@@ -481,8 +525,9 @@ const loadState = async () => {
   const activeTab = await queryActiveTab();
 
   if (!activeTab || !isUrlEligible(activeTab.url)) {
-    intervalDisplay.textContent = "Interval: not set";
-    remainingDisplay.textContent = "⚠️ Not available for this page";
+    intervalDisplay.textContent = "Interval is not set";
+    document.querySelector(".reload-status").textContent =
+      "⚠️ Not available for this page";
     setInputsDisabled(true);
     startBtn.disabled = true;
     stopBtn.disabled = true;
@@ -534,6 +579,10 @@ const loadState = async () => {
       randomnessControls.classList.add("hidden");
     }
 
+    // Загружаем настройку домена
+    applyToDomainCheckbox.checked = entry.applyToDomain || false;
+    updateDomainHint();
+
     setInputsDisabled(true);
     startBtn.disabled = true;
     stopBtn.disabled = false;
@@ -584,6 +633,9 @@ const loadState = async () => {
         normalDistInfo.classList.add("hidden");
         uniformRange.style.display = "block";
       }
+
+      // Восстанавливаем настройку домена
+      applyToDomainCheckbox.checked = savedSettings.applyToDomain || false;
     } else {
       // Нет сохраненных настроек - устанавливаем значения по умолчанию
       // По умолчанию: 5 минут
@@ -606,8 +658,10 @@ const loadState = async () => {
       normalDistCheckbox.checked = false;
       normalDistInfo.classList.add("hidden");
       uniformRange.style.display = "block";
+      applyToDomainCheckbox.checked = false;
     }
 
+    updateDomainHint();
     setInputsDisabled(false);
     startBtn.disabled = false;
     stopBtn.disabled = true;
@@ -647,6 +701,25 @@ timeSlider.addEventListener("input", () => {
   updateSliderDisplay(position);
   applySliderValueToInputs(position);
   updateRandomnessRanges();
+  saveCurrentUrlSettings();
+});
+
+// Обновление подсказки домена
+const updateDomainHint = async () => {
+  const activeTab = await queryActiveTab();
+  if (activeTab && isUrlEligible(activeTab.url)) {
+    const domain = getDomainFromUrl(activeTab.url);
+    if (applyToDomainCheckbox.checked && domain) {
+      domainHint.textContent = `Will reload all pages on ${domain}`;
+    } else {
+      domainHint.textContent = "";
+    }
+  }
+};
+
+// Обработчик чекбокса применения к домену
+applyToDomainCheckbox.addEventListener("change", () => {
+  updateDomainHint();
   saveCurrentUrlSettings();
 });
 
@@ -728,4 +801,17 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // Очистка при закрытии popup
 window.addEventListener("unload", () => {
   stopStatusUpdates();
+});
+
+// Слушаем сообщения от background.js о восстановлении таймера
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "timerRestored") {
+    // Таймер был восстановлен - перезагружаем состояние
+    queryActiveTab().then((activeTab) => {
+      if (activeTab && activeTab.id === message.tabId) {
+        stopStatusUpdates();
+        loadState();
+      }
+    });
+  }
 });
