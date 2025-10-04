@@ -1,4 +1,5 @@
 const AUTO_RELOAD_KEY = "autoReloadTabs";
+const URL_SETTINGS_KEY = "urlSettings"; // Последние настройки для каждого URL
 const ICON_ACTIVE = "icon128.png";
 const ICON_INACTIVE = "icon128-gray.png";
 
@@ -74,6 +75,52 @@ const saveStoredTabs = (tabsMap) =>
     }
     chrome.storage.local.set({ [AUTO_RELOAD_KEY]: tabsMap }, resolve);
   });
+
+// Получить настройки для конкретного URL
+const getUrlSettings = async (url) => {
+  return new Promise((resolve) => {
+    chrome.storage.local.get([URL_SETTINGS_KEY], (result) => {
+      const allSettings = result[URL_SETTINGS_KEY] || {};
+      resolve(allSettings[url] || null);
+    });
+  });
+};
+
+// Сохранить настройки для конкретного URL
+const saveUrlSettings = async (url, settings) => {
+  return new Promise((resolve) => {
+    chrome.storage.local.get([URL_SETTINGS_KEY], (result) => {
+      const allSettings = result[URL_SETTINGS_KEY] || {};
+      allSettings[url] = settings;
+      chrome.storage.local.set({ [URL_SETTINGS_KEY]: allSettings }, resolve);
+    });
+  });
+};
+
+// Собрать текущие настройки из UI
+const getCurrentSettings = () => {
+  const totalSeconds = getTimeInSeconds();
+  return {
+    intervalSeconds: totalSeconds,
+    randomness: {
+      enabled: randomnessCheckbox.checked,
+      variationPercent: randomnessCheckbox.checked
+        ? parseInt(variationSlider.value)
+        : 15,
+      useNormalDistribution:
+        randomnessCheckbox.checked && normalDistCheckbox.checked,
+    },
+  };
+};
+
+// Сохранить текущие настройки для текущего URL
+const saveCurrentUrlSettings = async () => {
+  const activeTab = await queryActiveTab();
+  if (!activeTab || !isUrlEligible(activeTab.url)) return;
+
+  const settings = getCurrentSettings();
+  await saveUrlSettings(activeTab.url, settings);
+};
 
 const setIconForTab = (tabId, enabled) => {
   chrome.action.setIcon(
@@ -493,17 +540,73 @@ const loadState = async () => {
 
     startStatusUpdates();
   } else {
-    // Таймер не активен
-    // Устанавливаем ползунок на начальное значение
-    timeSlider.value = 0;
-    updateSliderDisplay(0);
+    // Таймер не активен - загружаем последние настройки для этого URL
+    const savedSettings = await getUrlSettings(activeTab.url);
 
-    // Сбрасываем настройки случайности
-    randomnessCheckbox.checked = false;
-    randomnessControls.classList.add("hidden");
-    normalDistCheckbox.checked = false;
-    normalDistInfo.classList.add("hidden");
-    uniformRange.style.display = "block";
+    if (savedSettings && savedSettings.intervalSeconds) {
+      // Восстанавливаем сохраненные настройки
+      const intervalSeconds = savedSettings.intervalSeconds;
+      const hours = Math.floor(intervalSeconds / 3600);
+      const minutes = Math.floor((intervalSeconds % 3600) / 60);
+      const seconds = intervalSeconds % 60;
+
+      hoursInput.value = hours || "";
+      minutesInput.value = minutes || "";
+      secondsInput.value = seconds || "";
+
+      // Синхронизируем ползунок
+      const position = secondsToPosition(intervalSeconds);
+      timeSlider.value = Math.min(100, Math.max(0, position));
+      updateSliderDisplay(parseFloat(timeSlider.value));
+
+      // Восстанавливаем настройки случайности
+      if (savedSettings.randomness && savedSettings.randomness.enabled) {
+        randomnessCheckbox.checked = true;
+        randomnessControls.classList.remove("hidden");
+        variationSlider.value = savedSettings.randomness.variationPercent || 15;
+        variationValue.textContent = `±${variationSlider.value}%`;
+
+        if (savedSettings.randomness.useNormalDistribution) {
+          normalDistCheckbox.checked = true;
+          normalDistInfo.classList.remove("hidden");
+          uniformRange.style.display = "none";
+        } else {
+          normalDistCheckbox.checked = false;
+          normalDistInfo.classList.add("hidden");
+          uniformRange.style.display = "block";
+        }
+
+        updateRandomnessRanges();
+      } else {
+        randomnessCheckbox.checked = false;
+        randomnessControls.classList.add("hidden");
+        normalDistCheckbox.checked = false;
+        normalDistInfo.classList.add("hidden");
+        uniformRange.style.display = "block";
+      }
+    } else {
+      // Нет сохраненных настроек - устанавливаем значения по умолчанию
+      // По умолчанию: 5 минут
+      const defaultSeconds = 300; // 5 минут
+      const hours = Math.floor(defaultSeconds / 3600);
+      const minutes = Math.floor((defaultSeconds % 3600) / 60);
+      const seconds = defaultSeconds % 60;
+
+      hoursInput.value = hours || "";
+      minutesInput.value = minutes || "";
+      secondsInput.value = seconds || "";
+
+      // Синхронизируем ползунок с дефолтным значением
+      const position = secondsToPosition(defaultSeconds);
+      timeSlider.value = Math.min(100, Math.max(0, position));
+      updateSliderDisplay(parseFloat(timeSlider.value));
+
+      randomnessCheckbox.checked = false;
+      randomnessControls.classList.add("hidden");
+      normalDistCheckbox.checked = false;
+      normalDistInfo.classList.add("hidden");
+      uniformRange.style.display = "block";
+    }
 
     setInputsDisabled(false);
     startBtn.disabled = false;
@@ -525,6 +628,9 @@ const validateInput = (input) => {
   showError(false);
   syncSliderWithInputs();
   updateRandomnessRanges();
+
+  // Сохраняем настройки при изменении
+  saveCurrentUrlSettings();
 };
 
 // События
@@ -541,6 +647,7 @@ timeSlider.addEventListener("input", () => {
   updateSliderDisplay(position);
   applySliderValueToInputs(position);
   updateRandomnessRanges();
+  saveCurrentUrlSettings();
 });
 
 // Обработчик чекбокса случайности
@@ -554,6 +661,7 @@ randomnessCheckbox.addEventListener("change", () => {
     normalDistInfo.classList.add("hidden");
     uniformRange.style.display = "block";
   }
+  saveCurrentUrlSettings();
 });
 
 // Обработчик слайдера вариации
@@ -561,6 +669,7 @@ variationSlider.addEventListener("input", () => {
   const value = variationSlider.value;
   variationValue.textContent = `±${value}%`;
   updateRandomnessRanges();
+  saveCurrentUrlSettings();
 });
 
 // Обработчик чекбокса нормального распределения
@@ -572,6 +681,7 @@ normalDistCheckbox.addEventListener("change", () => {
     normalDistInfo.classList.add("hidden");
     uniformRange.style.display = "block";
   }
+  saveCurrentUrlSettings();
 });
 
 hoursInput.addEventListener("input", () => validateInput(hoursInput));
