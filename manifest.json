@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Page Auto Reloader",
-  "version": "1.2.0",
-  "description": "Автоматическое обновление выбранных страниц с гибкой настройкой интервала",
+  "version": "2.0.0",
+  "description": "Automatically reload selected pages with flexible interval settings",
   "permissions": [
     "storage",
     "tabs",

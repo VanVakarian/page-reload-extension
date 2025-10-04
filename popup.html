@@ -16,64 +16,65 @@
       <div class="input-group">
         <div class="input-wrapper">
           <label class="input-label"
-                 for="hours">Часы</label>
+                 for="hours">Hours</label>
           <input type="number"
                  id="hours"
                  class="time-input"
                  min="0"
                  max="999"
                  placeholder="0"
-                 value="0">
+                 disabled>
         </div>
         <div class="input-wrapper">
           <label class="input-label"
-                 for="minutes">Минуты</label>
+                 for="minutes">Minutes</label>
           <input type="number"
                  id="minutes"
                  class="time-input"
                  min="0"
                  max="999"
                  placeholder="0"
-                 value="1">
+                 disabled>
         </div>
         <div class="input-wrapper">
           <label class="input-label"
-                 for="seconds">Секунды</label>
+                 for="seconds">Seconds</label>
           <input type="number"
                  id="seconds"
                  class="time-input"
                  min="0"
                  max="999"
                  placeholder="0"
-                 value="0">
+                 disabled>
         </div>
       </div>
 
       <div id="intervalDisplay"
            class="interval-display">
-        Интервал: не задан
+        Interval: not set
       </div>
 
       <div id="remainingDisplay"
            class="remaining-display">
-        Введите интервал обновления
+        Enter reload interval
       </div>
 
       <div class="error-message"
            id="errorMessage">
-        Время должно быть больше 0
+        Time must be greater than 0
       </div>
     </div>
 
     <div class="controls">
       <button id="startBtn"
-              class="btn btn-start">
-        ▶ Запустить
+              class="btn btn-start"
+              disabled>
+        ▶ Start
       </button>
       <button id="stopBtn"
               class="btn btn-stop"
               disabled>
-        ⏹ Остановить
+        ⏹ Stop
       </button>
     </div>
   </div>

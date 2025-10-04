@@ -246,9 +246,19 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     return;
   }
 
+  // При любом изменении статуса восстанавливаем иконку и badge
   if (changeInfo.status === "loading" || changeInfo.status === "complete") {
     setIconForTab(tabId, true);
-    refreshBadgeText();
+
+    // Немедленно обновляем badge для этой вкладки
+    const now = Date.now();
+    const intervalSeconds = entry.intervalSeconds || 60;
+    const intervalMs = intervalSeconds * 1000;
+    const nextReloadAt = entry.nextReloadAt || now + intervalMs;
+    const remainingMs = Math.max(0, nextReloadAt - now);
+    const remainingSec = Math.ceil(remainingMs / 1000);
+    const text = formatBadgeText(remainingSec);
+    updateBadgeText(tabId, text);
   }
 });
 
@@ -269,7 +279,15 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
     return;
   }
 
-  refreshBadgeText();
+  // Немедленно обновляем badge для активной вкладки
+  const now = Date.now();
+  const intervalSeconds = entry.intervalSeconds || 60;
+  const intervalMs = intervalSeconds * 1000;
+  const nextReloadAt = entry.nextReloadAt || now + intervalMs;
+  const remainingMs = Math.max(0, nextReloadAt - now);
+  const remainingSec = Math.ceil(remainingMs / 1000);
+  const text = formatBadgeText(remainingSec);
+  updateBadgeText(tabId, text);
 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {

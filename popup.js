@@ -16,6 +16,7 @@ const errorMessage = document.getElementById("errorMessage");
 
 let currentTabId = null;
 let updateIntervalId = null;
+let lastProgressWidth = 0; // Для отслеживания направления изменения
 
 // Утилиты
 const queryActiveTab = () =>
@@ -73,9 +74,9 @@ const formatTime = (totalSeconds) => {
   const seconds = totalSeconds % 60;
 
   const parts = [];
-  if (hours > 0) parts.push(`${hours}ч`);
-  if (minutes > 0) parts.push(`${minutes}м`);
-  if (seconds > 0 || parts.length === 0) parts.push(`${seconds}с`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
 
   return parts.join(" ");
 };
@@ -83,21 +84,74 @@ const formatTime = (totalSeconds) => {
 // Обновление UI статуса
 const updateStatus = (remainingSeconds, totalSeconds) => {
   if (remainingSeconds === null) {
-    intervalDisplay.textContent = "Интервал: не задан";
+    intervalDisplay.textContent = "Interval: not set";
     intervalDisplay.classList.remove("active");
-    remainingDisplay.textContent = "Введите интервал обновления";
-    remainingDisplay.classList.remove("active", "pulse");
+    remainingDisplay.textContent = "Enter reload interval";
+    remainingDisplay.classList.remove("active");
+    remainingDisplay.style.setProperty("--progress-width", "0%");
+    lastProgressWidth = 0; // Сбрасываем для следующего запуска
     return;
   }
 
   const formattedRemaining = formatTime(remainingSeconds);
   const formattedTotal = formatTime(totalSeconds);
 
-  intervalDisplay.textContent = `Интервал: ${formattedTotal}`;
+  intervalDisplay.textContent = `Interval: ${formattedTotal}`;
   intervalDisplay.classList.add("active");
 
-  remainingDisplay.textContent = `⏱️ До обновления: ${formattedRemaining}`;
-  remainingDisplay.classList.add("active", "pulse");
+  remainingDisplay.textContent = `⏱️ Until reload: ${formattedRemaining}`;
+  remainingDisplay.classList.add("active");
+
+  // Обновляем фон блока как прогресс-бар
+  const progress = (remainingSeconds / totalSeconds) * 100;
+  const progressPercent = progress / 100;
+
+  // Определяем направление изменения
+  const isIncreasing = progress > lastProgressWidth;
+  lastProgressWidth = progress;
+
+  // Если увеличение - убираем transition, если уменьшение - включаем
+  if (isIncreasing) {
+    remainingDisplay.style.setProperty("--progress-transition", "none");
+  } else {
+    remainingDisplay.style.setProperty(
+      "--progress-transition",
+      "width 1s linear, background 1s linear"
+    );
+  }
+
+  // Интерполяция цвета: зелёный (100%) → жёлтый (50%) → красный (0%)
+  let color1, color2;
+
+  if (progressPercent > 0.5) {
+    // От зелёного к жёлтому (100% -> 50%)
+    const t = (progressPercent - 0.5) * 2; // 0..1
+    color1 = interpolateColor([16, 185, 129], [234, 179, 8], 1 - t);
+    color2 = interpolateColor([5, 150, 105], [202, 138, 4], 1 - t);
+  } else {
+    // От жёлтого к красному (50% -> 0%)
+    const t = progressPercent * 2; // 0..1
+    color1 = interpolateColor([239, 68, 68], [234, 179, 8], t);
+    color2 = interpolateColor([220, 38, 38], [202, 138, 4], t);
+  }
+
+  remainingDisplay.style.setProperty(
+    "--progress-width",
+    `${Math.max(0, progress)}%`
+  );
+  remainingDisplay.style.setProperty(
+    "--progress-gradient",
+    `linear-gradient(135deg, rgb(${color1[0]}, ${color1[1]}, ${color1[2]}) 0%, rgb(${color2[0]}, ${color2[1]}, ${color2[2]}) 100%)`
+  );
+};
+
+// Функция интерполяции цвета
+const interpolateColor = (color1, color2, factor) => {
+  return [
+    Math.round(color1[0] + (color2[0] - color1[0]) * factor),
+    Math.round(color1[1] + (color2[1] - color1[1]) * factor),
+    Math.round(color1[2] + (color2[2] - color1[2]) * factor),
+  ];
 };
 
 // Блокировка/разблокировка полей ввода
@@ -159,8 +213,8 @@ const startAutoReload = async () => {
 
   const activeTab = await queryActiveTab();
   if (!activeTab || !isUrlEligible(activeTab.url)) {
-    intervalDisplay.textContent = "Интервал: не задан";
-    remainingDisplay.textContent = "⚠️ Недоступно для этой страницы";
+    intervalDisplay.textContent = "Interval: not set";
+    remainingDisplay.textContent = "⚠️ Not available for this page";
     return;
   }
 
@@ -219,8 +273,8 @@ const loadState = async () => {
   const activeTab = await queryActiveTab();
 
   if (!activeTab || !isUrlEligible(activeTab.url)) {
-    intervalDisplay.textContent = "Интервал: не задан";
-    remainingDisplay.textContent = "⚠️ Недоступно для этой страницы";
+    intervalDisplay.textContent = "Interval: not set";
+    remainingDisplay.textContent = "⚠️ Not available for this page";
     setInputsDisabled(true);
     startBtn.disabled = true;
     stopBtn.disabled = true;
@@ -267,22 +321,34 @@ const validateInput = (input) => {
   if (value > 999) {
     input.value = "999";
   }
-  if (input.value === "") {
-    input.value = "0";
-  }
+  // Разрешаем пустые поля - они будут считаться как 0
   showError(false);
 };
 
 // События
+// Обработчики ввода
+const handleEnterKey = (event) => {
+  if (event.key === "Enter" && !startBtn.disabled) {
+    startAutoReload();
+  }
+};
+
 hoursInput.addEventListener("input", () => validateInput(hoursInput));
 minutesInput.addEventListener("input", () => validateInput(minutesInput));
 secondsInput.addEventListener("input", () => validateInput(secondsInput));
+
+hoursInput.addEventListener("keydown", handleEnterKey);
+minutesInput.addEventListener("keydown", handleEnterKey);
+secondsInput.addEventListener("keydown", handleEnterKey);
 
 startBtn.addEventListener("click", startAutoReload);
 stopBtn.addEventListener("click", stopAutoReload);
 
 // Инициализация
-loadState();
+loadState().then(() => {
+  // Показываем popup после загрузки состояния
+  document.body.classList.add("loaded");
+});
 
 // Очистка при закрытии popup
 window.addEventListener("unload", () => {
