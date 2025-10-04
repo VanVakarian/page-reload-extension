@@ -8,11 +8,30 @@ const alarmName = (tabId) => `autoReload-${tabId}`;
 const hoursInput = document.getElementById("hours");
 const minutesInput = document.getElementById("minutes");
 const secondsInput = document.getElementById("seconds");
+const timeSlider = document.getElementById("timeSlider");
+const sliderValueDisplay = document.getElementById("sliderValueDisplay");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
 const intervalDisplay = document.getElementById("intervalDisplay");
 const remainingDisplay = document.getElementById("remainingDisplay");
 const errorMessage = document.getElementById("errorMessage");
+
+// Константы для экспоненциальной функции
+const EXP_K = 0.1; // Коэффициент экспоненты
+const EXP_SCALE = 3.9227; // Масштабирующий коэффициент
+
+// Экспоненциальная функция для преобразования позиции ползунка в секунды
+// Формула: seconds = (e^(k*position) - 1) * scale + 1
+// Диапазон: position 0-100 → seconds 1-86400 (~24 часа)
+const positionToSeconds = (position) => {
+  return Math.round((Math.exp(EXP_K * position) - 1) * EXP_SCALE + 1);
+};
+
+// Обратная функция: из секунд в позицию ползунка
+// Формула: position = ln((seconds - 1) / scale + 1) / k
+const secondsToPosition = (seconds) => {
+  return Math.log((seconds - 1) / EXP_SCALE + 1) / EXP_K;
+};
 
 let currentTabId = null;
 let updateIntervalId = null;
@@ -79,6 +98,52 @@ const formatTime = (totalSeconds) => {
   if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
 
   return parts.join(" ");
+};
+
+// Форматирование для отображения на ползунке (более компактное)
+const formatSliderValue = (totalSeconds) => {
+  if (totalSeconds < 60) {
+    return `${totalSeconds} sec`;
+  } else if (totalSeconds < 3600) {
+    const minutes = Math.round(totalSeconds / 60);
+    return `${minutes} min`;
+  } else {
+    const hours = (totalSeconds / 3600).toFixed(1);
+    // Убираем .0 если число целое
+    return `${hours.replace(".0", "")} hours`;
+  }
+};
+
+// Обновление отображения значения ползунка
+const updateSliderDisplay = (position) => {
+  const seconds = positionToSeconds(position);
+  sliderValueDisplay.textContent = formatSliderValue(seconds);
+};
+
+// Применение значения из ползунка к полям ввода
+const applySliderValueToInputs = (position) => {
+  const totalSeconds = positionToSeconds(position);
+
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  hoursInput.value = hours || "";
+  minutesInput.value = minutes || "";
+  secondsInput.value = seconds || "";
+
+  showError(false);
+};
+
+// Синхронизация ползунка с полями ввода
+const syncSliderWithInputs = () => {
+  const totalSeconds = getTimeInSeconds();
+  if (totalSeconds > 0) {
+    const position = secondsToPosition(totalSeconds);
+    timeSlider.value = Math.min(100, Math.max(0, position));
+    // Показываем реальное значение, даже если ползунок упёрся в максимум
+    sliderValueDisplay.textContent = formatSliderValue(totalSeconds);
+  }
 };
 
 // Обновление UI статуса
@@ -159,6 +224,7 @@ const setInputsDisabled = (disabled) => {
   hoursInput.disabled = disabled;
   minutesInput.disabled = disabled;
   secondsInput.disabled = disabled;
+  timeSlider.disabled = disabled;
 };
 
 // Показ/скрытие ошибки
@@ -298,6 +364,11 @@ const loadState = async () => {
     minutesInput.value = minutes;
     secondsInput.value = seconds;
 
+    // Синхронизируем ползунок
+    const position = secondsToPosition(intervalSeconds);
+    timeSlider.value = Math.min(100, Math.max(0, position));
+    updateSliderDisplay(parseFloat(timeSlider.value));
+
     setInputsDisabled(true);
     startBtn.disabled = true;
     stopBtn.disabled = false;
@@ -305,6 +376,10 @@ const loadState = async () => {
     startStatusUpdates();
   } else {
     // Таймер не активен
+    // Устанавливаем ползунок на начальное значение
+    timeSlider.value = 0;
+    updateSliderDisplay(0);
+
     setInputsDisabled(false);
     startBtn.disabled = false;
     stopBtn.disabled = true;
@@ -323,6 +398,7 @@ const validateInput = (input) => {
   }
   // Разрешаем пустые поля - они будут считаться как 0
   showError(false);
+  syncSliderWithInputs();
 };
 
 // События
@@ -332,6 +408,13 @@ const handleEnterKey = (event) => {
     startAutoReload();
   }
 };
+
+// Обработчик ползунка
+timeSlider.addEventListener("input", () => {
+  const position = parseFloat(timeSlider.value);
+  updateSliderDisplay(position);
+  applySliderValueToInputs(position);
+});
 
 hoursInput.addEventListener("input", () => validateInput(hoursInput));
 minutesInput.addEventListener("input", () => validateInput(minutesInput));
