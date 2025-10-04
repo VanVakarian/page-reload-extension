@@ -72,6 +72,53 @@
         </div>
       </div>
 
+      <!-- Randomness Section -->
+      <div class="randomness-section">
+        <label class="checkbox-label">
+          <input type="checkbox"
+                 id="randomnessCheckbox"
+                 class="checkbox-input">
+          <span class="checkbox-text">Add randomness</span>
+        </label>
+
+        <div id="randomnessControls"
+             class="randomness-controls hidden">
+          <div class="variation-slider-wrapper">
+            <label class="variation-label">Variation: <span id="variationValue">±15%</span></label>
+            <input type="range"
+                   id="variationSlider"
+                   class="variation-slider"
+                   min="1"
+                   max="100"
+                   value="15"
+                   step="1">
+            <div class="variation-marks">
+              <span class="variation-mark">1%</span>
+              <span class="variation-mark">50%</span>
+              <span class="variation-mark">100%</span>
+            </div>
+          </div>
+
+          <div id="uniformRange"
+               class="distribution-info">
+            Range: <span id="uniformRangeText">—</span>
+          </div>
+
+          <label class="checkbox-label checkbox-nested">
+            <input type="checkbox"
+                   id="normalDistCheckbox"
+                   class="checkbox-input">
+            <span class="checkbox-text">Normal distribution (bell curve)</span>
+          </label>
+
+          <div id="normalDistInfo"
+               class="normal-dist-info hidden">
+            <div class="dist-range">• Typical (68%): <span id="range68">—</span></div>
+            <div class="dist-range">• Almost all (95%): <span id="range95">—</span></div>
+          </div>
+        </div>
+      </div>
+
       <div id="intervalDisplay"
            class="interval-display">
         Interval: not set

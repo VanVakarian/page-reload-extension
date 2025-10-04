@@ -15,6 +15,16 @@ const stopBtn = document.getElementById("stopBtn");
 const intervalDisplay = document.getElementById("intervalDisplay");
 const remainingDisplay = document.getElementById("remainingDisplay");
 const errorMessage = document.getElementById("errorMessage");
+const randomnessCheckbox = document.getElementById("randomnessCheckbox");
+const randomnessControls = document.getElementById("randomnessControls");
+const variationSlider = document.getElementById("variationSlider");
+const variationValue = document.getElementById("variationValue");
+const uniformRange = document.getElementById("uniformRange");
+const uniformRangeText = document.getElementById("uniformRangeText");
+const normalDistCheckbox = document.getElementById("normalDistCheckbox");
+const normalDistInfo = document.getElementById("normalDistInfo");
+const range68 = document.getElementById("range68");
+const range95 = document.getElementById("range95");
 
 // Константы для экспоненциальной функции
 const EXP_K = 0.1; // Коэффициент экспоненты
@@ -225,6 +235,9 @@ const setInputsDisabled = (disabled) => {
   minutesInput.disabled = disabled;
   secondsInput.disabled = disabled;
   timeSlider.disabled = disabled;
+  randomnessCheckbox.disabled = disabled;
+  variationSlider.disabled = disabled;
+  normalDistCheckbox.disabled = disabled;
 };
 
 // Показ/скрытие ошибки
@@ -234,6 +247,41 @@ const showError = (show) => {
   } else {
     errorMessage.classList.remove("show");
   }
+};
+
+// Обновление отображения диапазонов случайности
+const updateRandomnessRanges = () => {
+  const totalSeconds = getTimeInSeconds();
+  const variationPercent = parseInt(variationSlider.value);
+
+  if (totalSeconds < 1) {
+    uniformRangeText.textContent = "—";
+    range68.textContent = "—";
+    range95.textContent = "—";
+    return;
+  }
+
+  const variation = totalSeconds * (variationPercent / 100);
+  const minSeconds = Math.max(1, Math.round(totalSeconds - variation));
+  const maxSeconds = Math.round(totalSeconds + variation);
+
+  // Uniform range
+  uniformRangeText.textContent = `${formatTime(minSeconds)} - ${formatTime(
+    maxSeconds
+  )}`;
+
+  // Normal distribution ranges (σ = variation / 2, so ±2σ ≈ ±variation)
+  const sigma = variation / 2;
+
+  // 68% range (±1σ)
+  const min68 = Math.max(1, Math.round(totalSeconds - sigma));
+  const max68 = Math.round(totalSeconds + sigma);
+  range68.textContent = `${formatTime(min68)} - ${formatTime(max68)}`;
+
+  // 95% range (±2σ)
+  const min95 = Math.max(1, Math.round(totalSeconds - 2 * sigma));
+  const max95 = Math.round(totalSeconds + 2 * sigma);
+  range95.textContent = `${formatTime(min95)} - ${formatTime(max95)}`;
 };
 
 // Обновление оставшегося времени в реальном времени
@@ -252,7 +300,10 @@ const startStatusUpdates = async () => {
     const remainingMs = Math.max(0, entry.nextReloadAt - now);
     const remainingSeconds = Math.ceil(remainingMs / 1000);
 
-    updateStatus(remainingSeconds, entry.intervalSeconds);
+    // Используем реальный интервал для прогресс-бара
+    const actualInterval =
+      entry.currentActualInterval || entry.intervalSeconds || 60;
+    updateStatus(remainingSeconds, actualInterval);
   };
 
   await updateRemaining();
@@ -285,22 +336,61 @@ const startAutoReload = async () => {
   }
 
   const tabsMap = await getStoredTabs();
-  const nextReloadAt = Date.now() + totalSeconds * 1000;
+
+  const randomnessConfig = {
+    enabled: randomnessCheckbox.checked,
+    variationPercent: randomnessCheckbox.checked
+      ? parseInt(variationSlider.value)
+      : 0,
+    useNormalDistribution:
+      randomnessCheckbox.checked && normalDistCheckbox.checked,
+  };
+
+  // Вычисляем первый интервал с учетом случайности
+  let firstInterval = totalSeconds;
+  if (randomnessConfig.enabled) {
+    const variation = totalSeconds * (randomnessConfig.variationPercent / 100);
+
+    if (randomnessConfig.useNormalDistribution) {
+      // Нормальное распределение
+      const sigma = variation / 2;
+      const u1 = Math.random();
+      const u2 = Math.random();
+      const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+      firstInterval = z0 * sigma + totalSeconds;
+    } else {
+      // Равномерное распределение
+      const minInterval = totalSeconds - variation;
+      const maxInterval = totalSeconds + variation;
+      firstInterval = minInterval + Math.random() * (maxInterval - minInterval);
+    }
+
+    // Ограничиваем диапазон
+    firstInterval = Math.max(
+      1,
+      Math.min(totalSeconds * 2, Math.round(firstInterval))
+    );
+  }
+
+  const nextReloadAt = Date.now() + firstInterval * 1000;
 
   tabsMap[activeTab.id] = {
     url: activeTab.url,
     intervalSeconds: totalSeconds,
     nextReloadAt,
+    randomness: randomnessConfig,
+    currentActualInterval: firstInterval, // Реальный интервал для текущего цикла
   };
 
   await saveStoredTabs(tabsMap);
   setIconForTab(activeTab.id, true);
 
-  // Устанавливаем alarm
-  const delayInMinutes = totalSeconds / 60;
-  chrome.alarms.create(alarmName(activeTab.id), {
-    delayInMinutes,
-    periodInMinutes: delayInMinutes,
+  // Отправляем сообщение в background.js для создания таймера
+  // Background.js сам решит использовать alarm или setTimeout
+  chrome.runtime.sendMessage({
+    type: "scheduleReload",
+    tabId: activeTab.id,
+    intervalSeconds: firstInterval,
   });
 
   // Обновляем UI
@@ -323,7 +413,12 @@ const stopAutoReload = async () => {
   }
 
   setIconForTab(activeTab.id, false);
-  chrome.alarms.clear(alarmName(activeTab.id));
+
+  // Отправляем сообщение в background.js для очистки таймеров
+  chrome.runtime.sendMessage({
+    type: "clearReload",
+    tabId: activeTab.id,
+  });
 
   // Обновляем UI
   setInputsDisabled(false);
@@ -369,6 +464,29 @@ const loadState = async () => {
     timeSlider.value = Math.min(100, Math.max(0, position));
     updateSliderDisplay(parseFloat(timeSlider.value));
 
+    // Загружаем настройки случайности
+    if (entry.randomness && entry.randomness.enabled) {
+      randomnessCheckbox.checked = true;
+      randomnessControls.classList.remove("hidden");
+      variationSlider.value = entry.randomness.variationPercent || 15;
+      variationValue.textContent = `±${variationSlider.value}%`;
+
+      if (entry.randomness.useNormalDistribution) {
+        normalDistCheckbox.checked = true;
+        normalDistInfo.classList.remove("hidden");
+        uniformRange.style.display = "none";
+      } else {
+        normalDistCheckbox.checked = false;
+        normalDistInfo.classList.add("hidden");
+        uniformRange.style.display = "block";
+      }
+
+      updateRandomnessRanges();
+    } else {
+      randomnessCheckbox.checked = false;
+      randomnessControls.classList.add("hidden");
+    }
+
     setInputsDisabled(true);
     startBtn.disabled = true;
     stopBtn.disabled = false;
@@ -379,6 +497,13 @@ const loadState = async () => {
     // Устанавливаем ползунок на начальное значение
     timeSlider.value = 0;
     updateSliderDisplay(0);
+
+    // Сбрасываем настройки случайности
+    randomnessCheckbox.checked = false;
+    randomnessControls.classList.add("hidden");
+    normalDistCheckbox.checked = false;
+    normalDistInfo.classList.add("hidden");
+    uniformRange.style.display = "block";
 
     setInputsDisabled(false);
     startBtn.disabled = false;
@@ -399,6 +524,7 @@ const validateInput = (input) => {
   // Разрешаем пустые поля - они будут считаться как 0
   showError(false);
   syncSliderWithInputs();
+  updateRandomnessRanges();
 };
 
 // События
@@ -414,6 +540,38 @@ timeSlider.addEventListener("input", () => {
   const position = parseFloat(timeSlider.value);
   updateSliderDisplay(position);
   applySliderValueToInputs(position);
+  updateRandomnessRanges();
+});
+
+// Обработчик чекбокса случайности
+randomnessCheckbox.addEventListener("change", () => {
+  if (randomnessCheckbox.checked) {
+    randomnessControls.classList.remove("hidden");
+    updateRandomnessRanges();
+  } else {
+    randomnessControls.classList.add("hidden");
+    normalDistCheckbox.checked = false;
+    normalDistInfo.classList.add("hidden");
+    uniformRange.style.display = "block";
+  }
+});
+
+// Обработчик слайдера вариации
+variationSlider.addEventListener("input", () => {
+  const value = variationSlider.value;
+  variationValue.textContent = `±${value}%`;
+  updateRandomnessRanges();
+});
+
+// Обработчик чекбокса нормального распределения
+normalDistCheckbox.addEventListener("change", () => {
+  if (normalDistCheckbox.checked) {
+    normalDistInfo.classList.remove("hidden");
+    uniformRange.style.display = "none";
+  } else {
+    normalDistInfo.classList.add("hidden");
+    uniformRange.style.display = "block";
+  }
 });
 
 hoursInput.addEventListener("input", () => validateInput(hoursInput));
