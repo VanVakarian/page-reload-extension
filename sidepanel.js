@@ -1,9 +1,15 @@
-const AUTO_RELOAD_KEY = "autoReloadTabs";
-const URL_SETTINGS_KEY = "urlSettings"; // Последние настройки для каждого URL
+import {
+  addTimer,
+  findActiveTimerForUrl,
+  formatTime,
+  generateUUID,
+  getDomainFromUrl,
+  getTimers,
+  removeTimer,
+} from "./shared/utils.js";
+
 const ICON_ACTIVE = "icon128.png";
 const ICON_INACTIVE = "icon128-gray.png";
-
-const alarmName = (tabId) => `autoReload-${tabId}`;
 
 // DOM Elements
 const hoursInput = document.getElementById("hours");
@@ -62,21 +68,20 @@ const queryActiveTab = () =>
     });
   });
 
-const getStoredTabs = () =>
-  new Promise((resolve) => {
-    chrome.storage.local.get([AUTO_RELOAD_KEY], (result) => {
-      resolve(result[AUTO_RELOAD_KEY] || {});
-    });
-  });
-
-const saveStoredTabs = (tabsMap) =>
-  new Promise((resolve) => {
-    if (Object.keys(tabsMap).length === 0) {
-      chrome.storage.local.remove(AUTO_RELOAD_KEY, resolve);
-      return;
+const setIconForTab = (tabId, enabled) => {
+  chrome.action.setIcon(
+    { tabId, path: enabled ? ICON_ACTIVE : ICON_INACTIVE },
+    () => {
+      if (chrome.runtime.lastError) {
+        return;
+      }
     }
-    chrome.storage.local.set({ [AUTO_RELOAD_KEY]: tabsMap }, resolve);
-  });
+  );
+};
+
+const isUrlEligible = (url) => Boolean(url && /^https?:/i.test(url));
+
+// Получить текущие настройки из UI
 
 // Получить настройки для конкретного URL или домена
 const getUrlSettings = async (url, checkDomain = true) => {
@@ -116,6 +121,14 @@ const saveUrlSettings = async (url, settings) => {
   });
 };
 
+// Получить ключ для сохранения настроек (URL или домен)
+const getSettingsKey = (url, useDomain = false) => {
+  if (useDomain) {
+    return getDomainFromUrl(url) || url;
+  }
+  return url;
+};
+
 // Собрать текущие настройки из UI
 const getCurrentSettings = () => {
   const totalSeconds = getTimeInSeconds();
@@ -133,66 +146,12 @@ const getCurrentSettings = () => {
   };
 };
 
-// Сохранить текущие настройки для текущего URL
-const saveCurrentUrlSettings = async () => {
-  const activeTab = await queryActiveTab();
-  if (!activeTab || !isUrlEligible(activeTab.url)) return;
-
-  const settings = getCurrentSettings();
-  await saveUrlSettings(activeTab.url, settings);
-};
-
-const setIconForTab = (tabId, enabled) => {
-  chrome.action.setIcon(
-    { tabId, path: enabled ? ICON_ACTIVE : ICON_INACTIVE },
-    () => {
-      if (chrome.runtime.lastError) {
-        return;
-      }
-    }
-  );
-};
-
-const isUrlEligible = (url) => Boolean(url && /^https?:/i.test(url));
-
-// Извлечь домен из URL
-const getDomainFromUrl = (url) => {
-  try {
-    const urlObj = new URL(url);
-    return urlObj.hostname;
-  } catch (e) {
-    return null;
-  }
-};
-
-// Получить ключ для сохранения настроек (URL или домен)
-const getSettingsKey = (url, useDomain = false) => {
-  if (useDomain) {
-    return getDomainFromUrl(url) || url;
-  }
-  return url;
-};
-
 // Конвертация времени в секунды
 const getTimeInSeconds = () => {
   const hours = parseInt(hoursInput.value) || 0;
   const minutes = parseInt(minutesInput.value) || 0;
   const seconds = parseInt(secondsInput.value) || 0;
   return hours * 3600 + minutes * 60 + seconds;
-};
-
-// Форматирование времени для отображения
-const formatTime = (totalSeconds) => {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  const parts = [];
-  if (hours > 0) parts.push(`${hours}h`);
-  if (minutes > 0) parts.push(`${minutes}m`);
-  if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
-
-  return parts.join(" ");
 };
 
 // Форматирование для отображения на ползунке (более компактное)
@@ -376,22 +335,54 @@ const updateRandomnessRanges = () => {
 // Обновление оставшегося времени в реальном времени
 const startStatusUpdates = async () => {
   const updateRemaining = async () => {
-    const tabsMap = await getStoredTabs();
-    const entry = tabsMap[currentTabId];
+    const activeTab = await queryActiveTab();
+    if (!activeTab || !isUrlEligible(activeTab.url)) {
+      stopStatusUpdates();
+      updateStatus(null);
+      return;
+    }
 
-    if (!entry) {
+    const allTimers = await getTimers();
+    const activeTimer = findActiveTimerForUrl(allTimers, activeTab.url);
+
+    if (!activeTimer) {
       stopStatusUpdates();
       updateStatus(null);
       return;
     }
 
     const now = Date.now();
-    const remainingMs = Math.max(0, entry.nextReloadAt - now);
-    const remainingSeconds = Math.ceil(remainingMs / 1000);
+    const remainingMs = activeTimer.state.nextReloadAt - now;
+    const remainingSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
+
+    // Проверяем, не истек ли таймер
+    // Если таймер истек больше чем 2 секунды назад, возобновляем его
+    if (remainingMs < -2000) {
+      console.log(`Timer ${activeTimer.id} expired, resuming automatically...`);
+      // Отправляем сообщение в background.js для возобновления таймера
+      chrome.runtime.sendMessage(
+        {
+          type: "resumeExpiredTimer",
+          timerId: activeTimer.id,
+        },
+        () => {
+          if (chrome.runtime.lastError) {
+            console.error("Failed to resume timer:", chrome.runtime.lastError);
+          }
+        }
+      );
+      // Останавливаем обновления, loadState() перезагрузит UI после возобновления
+      stopStatusUpdates();
+      // Перезагружаем состояние через небольшую задержку
+      setTimeout(() => loadState(), 500);
+      return;
+    }
 
     // Используем реальный интервал для прогресс-бара
     const actualInterval =
-      entry.currentActualInterval || entry.intervalSeconds || 60;
+      activeTimer.state.currentActualInterval ||
+      activeTimer.settings.intervalSeconds ||
+      60;
     updateStatus(remainingSeconds, actualInterval);
   };
 
@@ -425,8 +416,43 @@ const startAutoReload = async () => {
     return;
   }
 
-  const tabsMap = await getStoredTabs();
+  const allTimers = await getTimers();
+  const currentDomain = getDomainFromUrl(activeTab.url);
+  const isApplyToDomain = applyToDomainCheckbox.checked;
 
+  // ПРОАКТИВНАЯ ОЧИСТКА КОНФЛИКТОВ
+  const timersToRemove = [];
+
+  if (isApplyToDomain) {
+    // Запускается доменный таймер - удаляем все URL-таймеры этого домена
+    for (const [timerId, timer] of Object.entries(allTimers)) {
+      if (timer.rule.type === "url") {
+        const timerDomain = getDomainFromUrl(timer.rule.value);
+        if (timerDomain === currentDomain) {
+          timersToRemove.push(timerId);
+        }
+      }
+    }
+  } else {
+    // Запускается URL-таймер - удаляем другой URL-таймер с тем же URL
+    for (const [timerId, timer] of Object.entries(allTimers)) {
+      if (timer.rule.type === "url" && timer.rule.value === activeTab.url) {
+        timersToRemove.push(timerId);
+      }
+    }
+  }
+
+  // Удаляем конфликтующие таймеры
+  for (const timerId of timersToRemove) {
+    await removeTimer(timerId);
+    // Отменяем их alarms
+    chrome.runtime.sendMessage({
+      type: "clearReload",
+      timerId: timerId,
+    });
+  }
+
+  // Создаем новый таймер
   const randomnessConfig = {
     enabled: randomnessCheckbox.checked,
     variationPercent: randomnessCheckbox.checked
@@ -464,26 +490,35 @@ const startAutoReload = async () => {
 
   const nextReloadAt = Date.now() + firstInterval * 1000;
 
-  tabsMap[activeTab.id] = {
-    url: activeTab.url,
-    intervalSeconds: totalSeconds,
-    nextReloadAt,
-    randomness: randomnessConfig,
-    applyToDomain: applyToDomainCheckbox.checked,
-    currentActualInterval: firstInterval, // Реальный интервал для текущего цикла
+  const newTimer = {
+    id: generateUUID(),
+    tabId: activeTab.id,
+    createdAt: Date.now(),
+    rule: {
+      type: isApplyToDomain ? "domain" : "url",
+      value: isApplyToDomain ? currentDomain : activeTab.url,
+    },
+    settings: {
+      intervalSeconds: totalSeconds,
+      randomness: randomnessConfig,
+    },
+    state: {
+      nextReloadAt,
+      currentActualInterval: firstInterval,
+    },
   };
 
-  await saveStoredTabs(tabsMap);
+  await addTimer(newTimer);
   setIconForTab(activeTab.id, true);
 
   // Отправляем сообщение в background.js для создания таймера
-  // Background.js сам решит использовать alarm или setTimeout
   chrome.runtime.sendMessage({
     type: "scheduleReload",
-    tabId: activeTab.id,
+    timerId: newTimer.id,
     intervalSeconds: firstInterval,
   });
 
+  // Сохраняем настройки UI
   // Обновляем UI
   setInputsDisabled(true);
   startBtn.disabled = true;
@@ -495,20 +530,22 @@ const startAutoReload = async () => {
 // Остановка автообновления
 const stopAutoReload = async () => {
   const activeTab = await queryActiveTab();
-  if (!activeTab) return;
+  if (!activeTab || !isUrlEligible(activeTab.url)) return;
 
-  const tabsMap = await getStoredTabs();
-  if (tabsMap[activeTab.id]) {
-    delete tabsMap[activeTab.id];
-    await saveStoredTabs(tabsMap);
-  }
+  const allTimers = await getTimers();
+  const activeTimer = findActiveTimerForUrl(allTimers, activeTab.url);
+
+  if (!activeTimer) return;
+
+  // Удаляем таймер из storage
+  await removeTimer(activeTimer.id);
 
   setIconForTab(activeTab.id, false);
 
   // Отправляем сообщение в background.js для очистки таймеров
   chrome.runtime.sendMessage({
     type: "clearReload",
-    tabId: activeTab.id,
+    timerId: activeTimer.id,
   });
 
   // Обновляем UI
@@ -536,20 +573,20 @@ const loadState = async () => {
 
   currentTabId = activeTab.id;
 
-  const tabsMap = await getStoredTabs();
-  const entry = tabsMap[activeTab.id];
-  const isEnabled = Boolean(entry && entry.url === activeTab.url);
+  const allTimers = await getTimers();
+  const activeTimer = findActiveTimerForUrl(allTimers, activeTab.url);
+  const isEnabled = Boolean(activeTimer);
 
   if (isEnabled) {
     // Таймер активен - показываем состояние
-    const intervalSeconds = entry.intervalSeconds || 60;
+    const intervalSeconds = activeTimer.settings.intervalSeconds || 60;
     const hours = Math.floor(intervalSeconds / 3600);
     const minutes = Math.floor((intervalSeconds % 3600) / 60);
     const seconds = intervalSeconds % 60;
 
-    hoursInput.value = hours;
-    minutesInput.value = minutes;
-    secondsInput.value = seconds;
+    hoursInput.value = hours || "";
+    minutesInput.value = minutes || "";
+    secondsInput.value = seconds || "";
 
     // Синхронизируем ползунок
     const position = secondsToPosition(intervalSeconds);
@@ -557,13 +594,17 @@ const loadState = async () => {
     updateSliderDisplay(parseFloat(timeSlider.value));
 
     // Загружаем настройки случайности
-    if (entry.randomness && entry.randomness.enabled) {
+    if (
+      activeTimer.settings.randomness &&
+      activeTimer.settings.randomness.enabled
+    ) {
       randomnessCheckbox.checked = true;
       randomnessControls.classList.remove("hidden");
-      variationSlider.value = entry.randomness.variationPercent || 15;
+      variationSlider.value =
+        activeTimer.settings.randomness.variationPercent || 15;
       variationValue.textContent = `±${variationSlider.value}%`;
 
-      if (entry.randomness.useNormalDistribution) {
+      if (activeTimer.settings.randomness.useNormalDistribution) {
         normalDistCheckbox.checked = true;
         normalDistInfo.classList.remove("hidden");
         uniformRange.style.display = "none";
@@ -580,7 +621,7 @@ const loadState = async () => {
     }
 
     // Загружаем настройку домена
-    applyToDomainCheckbox.checked = entry.applyToDomain || false;
+    applyToDomainCheckbox.checked = activeTimer.rule.type === "domain";
     updateDomainHint();
 
     setInputsDisabled(true);
@@ -589,77 +630,28 @@ const loadState = async () => {
 
     startStatusUpdates();
   } else {
-    // Таймер не активен - загружаем последние настройки для этого URL
-    const savedSettings = await getUrlSettings(activeTab.url);
+    // Таймер не активен - устанавливаем значения по умолчанию
+    // По умолчанию: 5 минут
+    const defaultSeconds = 300; // 5 минут
+    const hours = Math.floor(defaultSeconds / 3600);
+    const minutes = Math.floor((defaultSeconds % 3600) / 60);
+    const seconds = defaultSeconds % 60;
 
-    if (savedSettings && savedSettings.intervalSeconds) {
-      // Восстанавливаем сохраненные настройки
-      const intervalSeconds = savedSettings.intervalSeconds;
-      const hours = Math.floor(intervalSeconds / 3600);
-      const minutes = Math.floor((intervalSeconds % 3600) / 60);
-      const seconds = intervalSeconds % 60;
+    hoursInput.value = hours || "";
+    minutesInput.value = minutes || "";
+    secondsInput.value = seconds || "";
 
-      hoursInput.value = hours || "";
-      minutesInput.value = minutes || "";
-      secondsInput.value = seconds || "";
+    // Синхронизируем ползунок с дефолтным значением
+    const position = secondsToPosition(defaultSeconds);
+    timeSlider.value = Math.min(100, Math.max(0, position));
+    updateSliderDisplay(parseFloat(timeSlider.value));
 
-      // Синхронизируем ползунок
-      const position = secondsToPosition(intervalSeconds);
-      timeSlider.value = Math.min(100, Math.max(0, position));
-      updateSliderDisplay(parseFloat(timeSlider.value));
-
-      // Восстанавливаем настройки случайности
-      if (savedSettings.randomness && savedSettings.randomness.enabled) {
-        randomnessCheckbox.checked = true;
-        randomnessControls.classList.remove("hidden");
-        variationSlider.value = savedSettings.randomness.variationPercent || 15;
-        variationValue.textContent = `±${variationSlider.value}%`;
-
-        if (savedSettings.randomness.useNormalDistribution) {
-          normalDistCheckbox.checked = true;
-          normalDistInfo.classList.remove("hidden");
-          uniformRange.style.display = "none";
-        } else {
-          normalDistCheckbox.checked = false;
-          normalDistInfo.classList.add("hidden");
-          uniformRange.style.display = "block";
-        }
-
-        updateRandomnessRanges();
-      } else {
-        randomnessCheckbox.checked = false;
-        randomnessControls.classList.add("hidden");
-        normalDistCheckbox.checked = false;
-        normalDistInfo.classList.add("hidden");
-        uniformRange.style.display = "block";
-      }
-
-      // Восстанавливаем настройку домена
-      applyToDomainCheckbox.checked = savedSettings.applyToDomain || false;
-    } else {
-      // Нет сохраненных настроек - устанавливаем значения по умолчанию
-      // По умолчанию: 5 минут
-      const defaultSeconds = 300; // 5 минут
-      const hours = Math.floor(defaultSeconds / 3600);
-      const minutes = Math.floor((defaultSeconds % 3600) / 60);
-      const seconds = defaultSeconds % 60;
-
-      hoursInput.value = hours || "";
-      minutesInput.value = minutes || "";
-      secondsInput.value = seconds || "";
-
-      // Синхронизируем ползунок с дефолтным значением
-      const position = secondsToPosition(defaultSeconds);
-      timeSlider.value = Math.min(100, Math.max(0, position));
-      updateSliderDisplay(parseFloat(timeSlider.value));
-
-      randomnessCheckbox.checked = false;
-      randomnessControls.classList.add("hidden");
-      normalDistCheckbox.checked = false;
-      normalDistInfo.classList.add("hidden");
-      uniformRange.style.display = "block";
-      applyToDomainCheckbox.checked = false;
-    }
+    randomnessCheckbox.checked = false;
+    randomnessControls.classList.add("hidden");
+    normalDistCheckbox.checked = false;
+    normalDistInfo.classList.add("hidden");
+    uniformRange.style.display = "block";
+    applyToDomainCheckbox.checked = false;
 
     updateDomainHint();
     setInputsDisabled(false);
@@ -682,9 +674,6 @@ const validateInput = (input) => {
   showError(false);
   syncSliderWithInputs();
   updateRandomnessRanges();
-
-  // Сохраняем настройки при изменении
-  saveCurrentUrlSettings();
 };
 
 // События
@@ -701,7 +690,6 @@ timeSlider.addEventListener("input", () => {
   updateSliderDisplay(position);
   applySliderValueToInputs(position);
   updateRandomnessRanges();
-  saveCurrentUrlSettings();
 });
 
 // Обновление подсказки домена
@@ -710,7 +698,7 @@ const updateDomainHint = async () => {
   if (activeTab && isUrlEligible(activeTab.url)) {
     const domain = getDomainFromUrl(activeTab.url);
     if (applyToDomainCheckbox.checked && domain) {
-      domainHint.textContent = `Will reload all pages on ${domain}`;
+      domainHint.textContent = `Will reload anywhere on ${domain}`;
     } else {
       domainHint.textContent = "";
     }
@@ -720,7 +708,6 @@ const updateDomainHint = async () => {
 // Обработчик чекбокса применения к домену
 applyToDomainCheckbox.addEventListener("change", () => {
   updateDomainHint();
-  saveCurrentUrlSettings();
 });
 
 // Обработчик чекбокса случайности
@@ -734,7 +721,6 @@ randomnessCheckbox.addEventListener("change", () => {
     normalDistInfo.classList.add("hidden");
     uniformRange.style.display = "block";
   }
-  saveCurrentUrlSettings();
 });
 
 // Обработчик слайдера вариации
@@ -742,7 +728,6 @@ variationSlider.addEventListener("input", () => {
   const value = variationSlider.value;
   variationValue.textContent = `±${value}%`;
   updateRandomnessRanges();
-  saveCurrentUrlSettings();
 });
 
 // Обработчик чекбокса нормального распределения
@@ -754,7 +739,6 @@ normalDistCheckbox.addEventListener("change", () => {
     normalDistInfo.classList.add("hidden");
     uniformRange.style.display = "block";
   }
-  saveCurrentUrlSettings();
 });
 
 hoursInput.addEventListener("input", () => validateInput(hoursInput));
