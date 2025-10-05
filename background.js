@@ -1,6 +1,8 @@
 import {
   findActiveTimerForUrl,
+  forceSyncToCloud,
   getTimers,
+  mergeWithSync,
   migrateOldData,
   updateTimer,
 } from "./shared/utils.js";
@@ -217,38 +219,46 @@ const refreshBadgeText = async () => {
     return;
   }
 
+  // 1. Собираем все уникальные tabId из всех таймеров
+  const tabIds = new Set();
+  for (const timer of Object.values(timersCache)) {
+    if (timer.tabId) {
+      tabIds.add(timer.tabId);
+    }
+  }
+
   const now = Date.now();
 
-  for (const [timerId, timer] of Object.entries(timersCache)) {
-    if (!timer.tabId) continue;
-
-    const tab = await getTab(timer.tabId);
+  // 2. Для каждой вкладки устанавливаем badge ОДИН РАЗ
+  for (const tabId of tabIds) {
+    const tab = await getTab(tabId);
 
     if (!tab) {
-      updateBadgeText(timer.tabId, "");
-      setIconForTab(timer.tabId, false);
+      updateBadgeText(tabId, "");
+      setIconForTab(tabId, false);
       continue;
     }
 
-    // Проверяем, является ли этот таймер активным для данного URL
+    // Находим активный таймер для URL этой вкладки
     const activeTimer = findActiveTimerForUrl(timersCache, tab.url);
 
-    if (!activeTimer || activeTimer.id !== timerId) {
-      // Этот таймер не активен для данной вкладки
-      updateBadgeText(timer.tabId, "");
-      setIconForTab(timer.tabId, false);
+    if (!activeTimer || activeTimer.tabId !== tabId) {
+      // Нет активного таймера для этой вкладки
+      updateBadgeText(tabId, "");
+      setIconForTab(tabId, false);
       continue;
     }
 
-    const intervalSeconds = timer.settings.intervalSeconds || 60;
+    // Вычисляем оставшееся время для активного таймера
+    const intervalSeconds = activeTimer.settings.intervalSeconds || 60;
     const intervalMs = intervalSeconds * 1000;
-    const nextReloadAt = timer.state?.nextReloadAt || now + intervalMs;
+    const nextReloadAt = activeTimer.state?.nextReloadAt || now + intervalMs;
     const remainingMs = Math.max(0, nextReloadAt - now);
     const remainingSec = Math.ceil(remainingMs / 1000);
     const text = formatBadgeText(remainingSec);
 
-    updateBadgeText(timer.tabId, text);
-    setIconForTab(timer.tabId, true);
+    updateBadgeText(tabId, text);
+    setIconForTab(tabId, true);
   }
 };
 
@@ -284,12 +294,23 @@ chrome.runtime.onInstalled.addListener(async () => {
   const migrated = await migrateOldData();
   if (migrated) {
     console.log("Данные успешно мигрированы в новый формат");
-    // Перезагружаем кэш после миграции
-    timersCache = await getTimers();
   }
+
+  // Мердж с SYNC (на случай установки на новом устройстве)
+  const merged = await mergeWithSync();
+  if (merged) {
+    console.log("Таймеры восстановлены из sync");
+  }
+
+  // Перезагружаем кэш
+  timersCache = await getTimers();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
+  // Сначала мерджим с SYNC (подтягиваем изменения с других устройств)
+  await mergeWithSync();
+
+  // Потом читаем LOCAL (основное хранилище с учётом мерджа)
   timersCache = await getTimers();
 
   for (const [timerId, timer] of Object.entries(timersCache)) {
@@ -408,4 +429,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
   }
   return true; // Асинхронный ответ
+});
+
+// Принудительная синхронизация при закрытии браузера
+chrome.runtime.onSuspend.addListener(async () => {
+  console.log("Browser closing, forcing sync...");
+  await forceSyncToCloud();
 });
